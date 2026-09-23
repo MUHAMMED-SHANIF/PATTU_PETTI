@@ -2,9 +2,13 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:uuid/uuid.dart';
 import '../../../../shared/providers/global_providers.dart';
+import '../../../../data/local/database/app_database.dart';
+import '../../../../data/local/database/app_database_dao.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../library/presentation/providers/library_provider.dart';
+import '../../../player/presentation/providers/player_provider.dart';
 import '../../data/recording_file_manager.dart';
 import '../../data/recording_repository.dart';
 import '../../data/recording_service.dart';
@@ -54,6 +58,17 @@ class RecordingNotifier extends StateNotifier<RecordingSessionState> {
   DateTime? _sessionStartTime;
   Duration _accumulatedTime = Duration.zero;
 
+  /// Safely cancel any active recording and reset notifier to clean idle state.
+  Future<void> resetToIdle() async {
+    _timer?.cancel();
+    await _amplitudeSub?.cancel();
+    await service.cancelRecording();
+    _accumulatedTime = Duration.zero;
+    _sessionStartTime = null;
+    state = const RecordingSessionState();
+  }
+
+
   /// Start a new recording session.
   /// Strictly checks and requests microphone permission ONLY at this point.
   Future<void> startRecording() async {
@@ -92,6 +107,11 @@ class RecordingNotifier extends StateNotifier<RecordingSessionState> {
         return;
       }
     }
+
+    // Pause any active app audio playback to prevent audio focus conflicts
+    try {
+      await ref.read(playerNotifierProvider.notifier).pause();
+    } catch (_) {}
 
     // 2. Prepare recorder
     state = state.copyWith(
@@ -255,7 +275,7 @@ class RecordingNotifier extends StateNotifier<RecordingSessionState> {
   }
 
   /// Saves the recorded (and optionally trimmed) audio into PattuPetti/Recordings
-  /// and registers it in the application library.
+  /// and registers it in the application library and optionally in a playlist.
   Future<bool> saveRecording({
     required String title,
     String? artist,
@@ -263,6 +283,8 @@ class RecordingNotifier extends StateNotifier<RecordingSessionState> {
     String? genre,
     String? description,
     String? artworkPath,
+    bool addToSongsLibrary = true,
+    String? targetPlaylistId,
   }) async {
     final tempPath = state.tempFilePath;
     if (tempPath == null || tempPath.isEmpty) {
@@ -274,13 +296,7 @@ class RecordingNotifier extends StateNotifier<RecordingSessionState> {
     }
 
     final user = ref.read(authStateProvider).valueOrNull?.user;
-    if (user == null) {
-      state = state.copyWith(
-        status: RecordingStatus.error,
-        errorMessage: 'Please log in to save recordings to your library.',
-      );
-      return false;
-    }
+    final effectiveUserId = user?.id ?? 'local-offline-user';
 
     state = state.copyWith(status: RecordingStatus.saving);
 
@@ -319,21 +335,51 @@ class RecordingNotifier extends StateNotifier<RecordingSessionState> {
       // 3. Remove temporary recording file
       await fileManager.deleteFile(tempPath);
 
-      // 4. Save into Drift local database
+      // 4. Determine itemType and genre
+      final itemType = addToSongsLibrary ? 'song' : 'recording';
+      final effectiveGenre = (genre != null && genre.trim().isNotEmpty)
+          ? genre.trim()
+          : 'Recording';
+
+      // 5. Save into Drift local database
       final savedItem = await repository.saveRecording(
-        userId: user.id,
+        userId: effectiveUserId,
         filePath: targetPath,
         title: title.trim().isNotEmpty ? title.trim() : 'Recording',
-        artist: artist?.trim(),
-        album: album?.trim(),
-        genre: genre?.trim(),
+        artist: (artist != null && artist.trim().isNotEmpty)
+            ? artist.trim()
+            : 'Voice Recording',
+        album: (album != null && album.trim().isNotEmpty)
+            ? album.trim()
+            : 'Recordings',
+        genre: effectiveGenre,
         description: description?.trim(),
         artworkPath: artworkPath,
         durationMs: finalDurationMs,
+        itemType: itemType,
       );
 
-      // 5. Invalidate library streams to update UI instantly
+      // 6. If user selected a target playlist, add the item to that playlist
+      if (targetPlaylistId != null && targetPlaylistId.isNotEmpty) {
+        try {
+          final db = ref.read(appDatabaseProvider);
+          final existingItems = await db.getPlaylistItems(targetPlaylistId);
+          await db.addToPlaylist(
+            PlaylistItemsCompanion.insert(
+              id: const Uuid().v4(),
+              playlistId: targetPlaylistId,
+              audioItemId: savedItem.id,
+              position: existingItems.length,
+            ),
+          );
+        } catch (e) {
+          debugPrint('Error adding recording to playlist: $e');
+        }
+      }
+
+      // 7. Invalidate library streams to update UI instantly across tabs & home
       ref.invalidate(allRecordingsProvider);
+      ref.invalidate(allSongsProvider);
       ref.invalidate(recentlyAddedProvider);
 
       state = state.copyWith(

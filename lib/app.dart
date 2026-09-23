@@ -9,6 +9,8 @@ import 'features/home/presentation/screens/home_screen.dart';
 import 'features/library/presentation/screens/library_screen.dart';
 import 'features/search/presentation/screens/search_screen.dart';
 import 'features/playlists/presentation/screens/playlists_screen.dart';
+import 'features/playlists/presentation/screens/playlist_detail_screen.dart';
+import 'features/playlists/domain/entities/playlist_entity.dart';
 import 'features/profile/presentation/screens/profile_screen.dart';
 import 'features/player/presentation/screens/player_screen.dart';
 import 'features/clips/presentation/screens/clip_editor_screen.dart';
@@ -133,6 +135,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/notifications', builder: (c, s) => const NotificationsScreen()),
       GoRoute(path: '/settings', builder: (c, s) => const SettingsScreen()),
       GoRoute(path: '/premium-request', builder: (c, s) => const PremiumRequestScreen()),
+      GoRoute(
+        path: '/playlist/:id',
+        builder: (c, s) => PlaylistDetailScreen(playlistId: s.pathParameters['id']!),
+      ),
+      GoRoute(
+        path: '/smart-playlist/:type',
+        builder: (c, s) {
+          final typeName = s.pathParameters['type'];
+          final type = SmartPlaylistType.values.firstWhere(
+            (e) => e.name == typeName,
+            orElse: () => SmartPlaylistType.likedSongs,
+          );
+          return PlaylistDetailScreen(smartType: type);
+        },
+      ),
     ],
     errorBuilder: (context, state) => Scaffold(
       backgroundColor: AppTheme.background,

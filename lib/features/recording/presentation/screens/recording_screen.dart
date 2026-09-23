@@ -8,6 +8,11 @@ import 'package:just_audio/just_audio.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../../core/theme/app_theme.dart';
+import '../../../../data/local/database/app_database.dart';
+import '../../../../data/local/database/app_database_dao.dart';
+import '../../../../shared/providers/global_providers.dart';
+import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../player/presentation/providers/player_provider.dart';
 import '../../domain/entities/recording_state.dart';
 import '../providers/recording_provider.dart';
 
@@ -33,6 +38,10 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
   final _descController = TextEditingController();
   String? _selectedArtworkPath;
 
+  // Destination & Playlist Options
+  bool _addToSongsLibrary = true;
+  String? _selectedPlaylistId;
+
   // Trim Controllers (seconds)
   double _trimStartSec = 0.0;
   double _trimEndSec = 0.0;
@@ -43,11 +52,14 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
     super.initState();
     final now = DateTime.now();
     _titleController.text = 'Recording_${DateFormat('yyyy-MM-dd_HH-mm').format(now)}';
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(recordingNotifierProvider.notifier).resetToIdle();
+    });
   }
 
   @override
   void dispose() {
-    _previewPlayer?.dispose();
+    _disposePreviewPlayer();
     _titleController.dispose();
     _artistController.dispose();
     _albumController.dispose();
@@ -55,6 +67,17 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
     _descController.dispose();
     super.dispose();
   }
+
+  Future<void> _disposePreviewPlayer() async {
+    try {
+      await _previewPlayer?.stop();
+      await _previewPlayer?.dispose();
+    } catch (_) {}
+    _previewPlayer = null;
+    _isPreviewPlaying = false;
+    _previewPosition = Duration.zero;
+  }
+
 
   Future<void> _initPreviewPlayer(String filePath) async {
     _previewPlayer?.dispose();
@@ -268,7 +291,7 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
         const Spacer(),
 
         // 4. Control Cluster
-        if (state.isIdle)
+        if (state.isIdle || state.isError || state.isSaved)
           _buildIdleStartButton(notifier)
         else
           _buildActiveControls(state, notifier),
@@ -282,7 +305,10 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
     return Column(
       children: [
         GestureDetector(
-          onTap: () => notifier.startRecording(),
+          onTap: () async {
+            await _disposePreviewPlayer();
+            notifier.startRecording();
+          },
           child: Container(
             width: 84,
             height: 84,
@@ -335,6 +361,7 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
             onPressed: () async {
               final confirm = await _showExitConfirmDialog();
               if (confirm == true) {
+                await _disposePreviewPlayer();
                 await notifier.cancelRecording();
               }
             },
@@ -408,6 +435,29 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (state.errorMessage != null) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: AppTheme.error.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppTheme.error.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline_rounded, color: AppTheme.error, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      state.errorMessage!,
+                      style: const TextStyle(color: AppTheme.error, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           // 1. Audio Preview Playback Card
           Container(
             padding: const EdgeInsets.all(20),
@@ -776,9 +826,11 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
               ],
             ),
           ),
+          // 4. Library & Playlist Options Card
+          _buildDestinationCard(),
           const SizedBox(height: 24),
 
-          // 4. Save & Actions Bar
+          // 5. Save & Actions Bar
           SizedBox(
             width: double.infinity,
             height: 52,
@@ -799,31 +851,7 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
                 foregroundColor: Colors.black,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
-              onPressed: state.isSaving
-                  ? null
-                  : () async {
-                      final success = await notifier.saveRecording(
-                        title: _titleController.text.trim(),
-                        artist: _artistController.text.trim(),
-                        album: _albumController.text.trim(),
-                        genre: _genreController.text.trim(),
-                        description: _descController.text.trim(),
-                        artworkPath: _selectedArtworkPath,
-                      );
-
-                      if (success && mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            backgroundColor: AppTheme.accent,
-                            content: Text(
-                              'Recording saved successfully to Library!',
-                              style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        );
-                        context.pop();
-                      }
-                    },
+              onPressed: state.isSaving ? null : () => _handleSave(notifier),
             ),
           ),
           const SizedBox(height: 12),
@@ -857,6 +885,10 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
                   onPressed: () async {
                     final confirm = await _showRetakeConfirmDialog();
                     if (confirm == true) {
+                      await _disposePreviewPlayer();
+                      final now = DateTime.now();
+                      _titleController.text =
+                          'Recording_${DateFormat('yyyy-MM-dd_HH-mm').format(now)}';
                       await notifier.retakeRecording();
                     }
                   },
@@ -869,6 +901,7 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
                 onPressed: () async {
                   final confirm = await _showDiscardConfirmDialog();
                   if (confirm == true) {
+                    await _disposePreviewPlayer();
                     await notifier.cancelRecording();
                     if (mounted) context.pop();
                   }
@@ -881,6 +914,298 @@ class _RecordingScreenState extends ConsumerState<RecordingScreen> {
       ),
     );
   }
+
+  Widget _buildDestinationCard() {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: _addToSongsLibrary
+              ? AppTheme.accent.withValues(alpha: 0.3)
+              : Colors.white.withValues(alpha: 0.08),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.library_music_rounded, color: AppTheme.accent, size: 20),
+              SizedBox(width: 8),
+              Text(
+                'LIBRARY DESTINATION',
+                style: TextStyle(
+                  color: AppTheme.textTertiary,
+                  fontSize: 11,
+                  letterSpacing: 1,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            activeTrackColor: AppTheme.accent,
+            title: const Text(
+              'Add to Main Songs Library',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+              ),
+            ),
+            subtitle: const Text(
+              'Makes this recording immediately available in Songs tab, Home, and Player queue.',
+              style: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
+            ),
+            value: _addToSongsLibrary,
+            onChanged: (val) {
+              setState(() => _addToSongsLibrary = val);
+            },
+          ),
+          const Divider(color: Colors.white10, height: 24),
+          _buildPlaylistSelector(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPlaylistSelector() {
+    final authState = ref.watch(authStateProvider);
+    final userId = authState.valueOrNull?.user?.id ?? 'local-offline-user';
+    final db = ref.watch(appDatabaseProvider);
+
+    return StreamBuilder<List<Playlist>>(
+      stream: db.watchPlaylists(userId),
+      builder: (context, snapshot) {
+        final playlists = snapshot.data ?? [];
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.playlist_add_rounded, color: AppTheme.accent, size: 18),
+                const SizedBox(width: 8),
+                const Text(
+                  'Add to Playlist (Optional)',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (_selectedPlaylistId != null) ...[
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => setState(() => _selectedPlaylistId = null),
+                    child: const Text(
+                      'Clear',
+                      style: TextStyle(color: AppTheme.error, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (playlists.isEmpty)
+              const Text(
+                'No playlists yet. You can create playlists in the Playlists tab.',
+                style: TextStyle(color: AppTheme.textTertiary, fontSize: 12),
+              )
+            else
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceHighlight,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    isExpanded: true,
+                    value: _selectedPlaylistId,
+                    hint: const Text(
+                      'Select a playlist...',
+                      style: TextStyle(color: AppTheme.textTertiary, fontSize: 13),
+                    ),
+                    dropdownColor: AppTheme.surface,
+                    style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+                    items: playlists.map((p) {
+                      return DropdownMenuItem<String>(
+                        value: p.id,
+                        child: Text(
+                          p.name,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      setState(() => _selectedPlaylistId = val);
+                    },
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _handleSave(RecordingNotifier notifier) async {
+    final success = await notifier.saveRecording(
+      title: _titleController.text.trim(),
+      artist: _artistController.text.trim(),
+      album: _albumController.text.trim(),
+      genre: _genreController.text.trim(),
+      description: _descController.text.trim(),
+      artworkPath: _selectedArtworkPath,
+      addToSongsLibrary: _addToSongsLibrary,
+      targetPlaylistId: _selectedPlaylistId,
+    );
+
+    if (!mounted) return;
+
+    if (success) {
+      await _disposePreviewPlayer();
+      final savedId = ref.read(recordingNotifierProvider).savedAudioItemId;
+      _showSavedSuccessSheet(savedId);
+    } else {
+      final error = ref.read(recordingNotifierProvider).errorMessage ??
+          'Failed to save recording. Please try again.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: AppTheme.error,
+          content: Text(error, style: const TextStyle(color: Colors.white)),
+        ),
+      );
+    }
+  }
+
+  void _showSavedSuccessSheet(String? savedAudioItemId) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      isDismissible: false,
+      enableDrag: false,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: AppTheme.accent.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.check_circle_rounded,
+                  color: AppTheme.accent,
+                  size: 36,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Added to Library!',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _addToSongsLibrary
+                    ? 'Your recording is saved and ready to play in Songs & Recordings.'
+                    : 'Your recording is saved in Studio Recordings.',
+                style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              // Play Now Button
+              if (savedAudioItemId != null)
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.accent,
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    label: const Text('Play Now', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () async {
+                      Navigator.of(ctx).pop();
+                      final db = ref.read(appDatabaseProvider);
+                      final item = await db.getAudioItemById(savedAudioItemId);
+                      if (item != null) {
+                        await ref.read(playerNotifierProvider.notifier).playDbItem(item);
+                      }
+                      if (mounted) context.pop();
+                    },
+                  ),
+                ),
+              const SizedBox(height: 12),
+              // View in Library & Record Another
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.textPrimary,
+                        side: const BorderSide(color: Colors.white24),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      icon: const Icon(Icons.library_music_rounded, size: 18),
+                      label: const Text('Go to Library'),
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        if (mounted) {
+                          context.go('/library');
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.accent,
+                        side: const BorderSide(color: AppTheme.accent),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      icon: const Icon(Icons.fiber_manual_record_rounded, size: 18, color: AppTheme.error),
+                      label: const Text('Record Another'),
+                      onPressed: () async {
+                        Navigator.of(ctx).pop();
+                        final now = DateTime.now();
+                        _titleController.text =
+                            'Recording_${DateFormat('yyyy-MM-dd_HH-mm').format(now)}';
+                        _selectedArtworkPath = null;
+                        _selectedPlaylistId = null;
+                        await ref.read(recordingNotifierProvider.notifier).resetToIdle();
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
 
   // ───────────────────────────────────────────────────────────────────────────
   // VIEW 3: PERMISSION DENIED VIEW

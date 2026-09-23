@@ -4175,6 +4175,21 @@ class $PlaylistsTable extends Playlists
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _isLikedMeta = const VerificationMeta(
+    'isLiked',
+  );
+  @override
+  late final GeneratedColumn<bool> isLiked = GeneratedColumn<bool>(
+    'is_liked',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_liked" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
   static const VerificationMeta _isSmartMeta = const VerificationMeta(
     'isSmart',
   );
@@ -4232,6 +4247,7 @@ class $PlaylistsTable extends Playlists
     name,
     description,
     artworkPath,
+    isLiked,
     isSmart,
     smartCriteria,
     createdAt,
@@ -4286,6 +4302,12 @@ class $PlaylistsTable extends Playlists
           data['artwork_path']!,
           _artworkPathMeta,
         ),
+      );
+    }
+    if (data.containsKey('is_liked')) {
+      context.handle(
+        _isLikedMeta,
+        isLiked.isAcceptableOrUnknown(data['is_liked']!, _isLikedMeta),
       );
     }
     if (data.containsKey('is_smart')) {
@@ -4344,6 +4366,10 @@ class $PlaylistsTable extends Playlists
         DriftSqlType.string,
         data['${effectivePrefix}artwork_path'],
       ),
+      isLiked: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_liked'],
+      )!,
       isSmart: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}is_smart'],
@@ -4375,6 +4401,7 @@ class Playlist extends DataClass implements Insertable<Playlist> {
   final String name;
   final String? description;
   final String? artworkPath;
+  final bool isLiked;
   final bool isSmart;
   final String? smartCriteria;
   final DateTime createdAt;
@@ -4385,6 +4412,7 @@ class Playlist extends DataClass implements Insertable<Playlist> {
     required this.name,
     this.description,
     this.artworkPath,
+    required this.isLiked,
     required this.isSmart,
     this.smartCriteria,
     required this.createdAt,
@@ -4402,6 +4430,7 @@ class Playlist extends DataClass implements Insertable<Playlist> {
     if (!nullToAbsent || artworkPath != null) {
       map['artwork_path'] = Variable<String>(artworkPath);
     }
+    map['is_liked'] = Variable<bool>(isLiked);
     map['is_smart'] = Variable<bool>(isSmart);
     if (!nullToAbsent || smartCriteria != null) {
       map['smart_criteria'] = Variable<String>(smartCriteria);
@@ -4422,6 +4451,7 @@ class Playlist extends DataClass implements Insertable<Playlist> {
       artworkPath: artworkPath == null && nullToAbsent
           ? const Value.absent()
           : Value(artworkPath),
+      isLiked: Value(isLiked),
       isSmart: Value(isSmart),
       smartCriteria: smartCriteria == null && nullToAbsent
           ? const Value.absent()
@@ -4442,6 +4472,7 @@ class Playlist extends DataClass implements Insertable<Playlist> {
       name: serializer.fromJson<String>(json['name']),
       description: serializer.fromJson<String?>(json['description']),
       artworkPath: serializer.fromJson<String?>(json['artworkPath']),
+      isLiked: serializer.fromJson<bool>(json['isLiked']),
       isSmart: serializer.fromJson<bool>(json['isSmart']),
       smartCriteria: serializer.fromJson<String?>(json['smartCriteria']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
@@ -4457,6 +4488,7 @@ class Playlist extends DataClass implements Insertable<Playlist> {
       'name': serializer.toJson<String>(name),
       'description': serializer.toJson<String?>(description),
       'artworkPath': serializer.toJson<String?>(artworkPath),
+      'isLiked': serializer.toJson<bool>(isLiked),
       'isSmart': serializer.toJson<bool>(isSmart),
       'smartCriteria': serializer.toJson<String?>(smartCriteria),
       'createdAt': serializer.toJson<DateTime>(createdAt),
@@ -4470,6 +4502,7 @@ class Playlist extends DataClass implements Insertable<Playlist> {
     String? name,
     Value<String?> description = const Value.absent(),
     Value<String?> artworkPath = const Value.absent(),
+    bool? isLiked,
     bool? isSmart,
     Value<String?> smartCriteria = const Value.absent(),
     DateTime? createdAt,
@@ -4480,6 +4513,7 @@ class Playlist extends DataClass implements Insertable<Playlist> {
     name: name ?? this.name,
     description: description.present ? description.value : this.description,
     artworkPath: artworkPath.present ? artworkPath.value : this.artworkPath,
+    isLiked: isLiked ?? this.isLiked,
     isSmart: isSmart ?? this.isSmart,
     smartCriteria: smartCriteria.present
         ? smartCriteria.value
@@ -4498,6 +4532,7 @@ class Playlist extends DataClass implements Insertable<Playlist> {
       artworkPath: data.artworkPath.present
           ? data.artworkPath.value
           : this.artworkPath,
+      isLiked: data.isLiked.present ? data.isLiked.value : this.isLiked,
       isSmart: data.isSmart.present ? data.isSmart.value : this.isSmart,
       smartCriteria: data.smartCriteria.present
           ? data.smartCriteria.value
@@ -4515,6 +4550,7 @@ class Playlist extends DataClass implements Insertable<Playlist> {
           ..write('name: $name, ')
           ..write('description: $description, ')
           ..write('artworkPath: $artworkPath, ')
+          ..write('isLiked: $isLiked, ')
           ..write('isSmart: $isSmart, ')
           ..write('smartCriteria: $smartCriteria, ')
           ..write('createdAt: $createdAt, ')
@@ -4530,6 +4566,7 @@ class Playlist extends DataClass implements Insertable<Playlist> {
     name,
     description,
     artworkPath,
+    isLiked,
     isSmart,
     smartCriteria,
     createdAt,
@@ -4544,6 +4581,7 @@ class Playlist extends DataClass implements Insertable<Playlist> {
           other.name == this.name &&
           other.description == this.description &&
           other.artworkPath == this.artworkPath &&
+          other.isLiked == this.isLiked &&
           other.isSmart == this.isSmart &&
           other.smartCriteria == this.smartCriteria &&
           other.createdAt == this.createdAt &&
@@ -4556,6 +4594,7 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
   final Value<String> name;
   final Value<String?> description;
   final Value<String?> artworkPath;
+  final Value<bool> isLiked;
   final Value<bool> isSmart;
   final Value<String?> smartCriteria;
   final Value<DateTime> createdAt;
@@ -4567,6 +4606,7 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
     this.name = const Value.absent(),
     this.description = const Value.absent(),
     this.artworkPath = const Value.absent(),
+    this.isLiked = const Value.absent(),
     this.isSmart = const Value.absent(),
     this.smartCriteria = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -4579,6 +4619,7 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
     required String name,
     this.description = const Value.absent(),
     this.artworkPath = const Value.absent(),
+    this.isLiked = const Value.absent(),
     this.isSmart = const Value.absent(),
     this.smartCriteria = const Value.absent(),
     this.createdAt = const Value.absent(),
@@ -4593,6 +4634,7 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
     Expression<String>? name,
     Expression<String>? description,
     Expression<String>? artworkPath,
+    Expression<bool>? isLiked,
     Expression<bool>? isSmart,
     Expression<String>? smartCriteria,
     Expression<DateTime>? createdAt,
@@ -4605,6 +4647,7 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
       if (name != null) 'name': name,
       if (description != null) 'description': description,
       if (artworkPath != null) 'artwork_path': artworkPath,
+      if (isLiked != null) 'is_liked': isLiked,
       if (isSmart != null) 'is_smart': isSmart,
       if (smartCriteria != null) 'smart_criteria': smartCriteria,
       if (createdAt != null) 'created_at': createdAt,
@@ -4619,6 +4662,7 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
     Value<String>? name,
     Value<String?>? description,
     Value<String?>? artworkPath,
+    Value<bool>? isLiked,
     Value<bool>? isSmart,
     Value<String?>? smartCriteria,
     Value<DateTime>? createdAt,
@@ -4631,6 +4675,7 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
       name: name ?? this.name,
       description: description ?? this.description,
       artworkPath: artworkPath ?? this.artworkPath,
+      isLiked: isLiked ?? this.isLiked,
       isSmart: isSmart ?? this.isSmart,
       smartCriteria: smartCriteria ?? this.smartCriteria,
       createdAt: createdAt ?? this.createdAt,
@@ -4656,6 +4701,9 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
     }
     if (artworkPath.present) {
       map['artwork_path'] = Variable<String>(artworkPath.value);
+    }
+    if (isLiked.present) {
+      map['is_liked'] = Variable<bool>(isLiked.value);
     }
     if (isSmart.present) {
       map['is_smart'] = Variable<bool>(isSmart.value);
@@ -4683,6 +4731,7 @@ class PlaylistsCompanion extends UpdateCompanion<Playlist> {
           ..write('name: $name, ')
           ..write('description: $description, ')
           ..write('artworkPath: $artworkPath, ')
+          ..write('isLiked: $isLiked, ')
           ..write('isSmart: $isSmart, ')
           ..write('smartCriteria: $smartCriteria, ')
           ..write('createdAt: $createdAt, ')
@@ -10114,6 +10163,7 @@ typedef $$PlaylistsTableCreateCompanionBuilder =
       required String name,
       Value<String?> description,
       Value<String?> artworkPath,
+      Value<bool> isLiked,
       Value<bool> isSmart,
       Value<String?> smartCriteria,
       Value<DateTime> createdAt,
@@ -10127,6 +10177,7 @@ typedef $$PlaylistsTableUpdateCompanionBuilder =
       Value<String> name,
       Value<String?> description,
       Value<String?> artworkPath,
+      Value<bool> isLiked,
       Value<bool> isSmart,
       Value<String?> smartCriteria,
       Value<DateTime> createdAt,
@@ -10191,6 +10242,11 @@ class $$PlaylistsTableFilterComposer
 
   ColumnFilters<String> get artworkPath => $composableBuilder(
     column: $table.artworkPath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isLiked => $composableBuilder(
+    column: $table.isLiked,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -10274,6 +10330,11 @@ class $$PlaylistsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get isLiked => $composableBuilder(
+    column: $table.isLiked,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<bool> get isSmart => $composableBuilder(
     column: $table.isSmart,
     builder: (column) => ColumnOrderings(column),
@@ -10322,6 +10383,9 @@ class $$PlaylistsTableAnnotationComposer
     column: $table.artworkPath,
     builder: (column) => column,
   );
+
+  GeneratedColumn<bool> get isLiked =>
+      $composableBuilder(column: $table.isLiked, builder: (column) => column);
 
   GeneratedColumn<bool> get isSmart =>
       $composableBuilder(column: $table.isSmart, builder: (column) => column);
@@ -10396,6 +10460,7 @@ class $$PlaylistsTableTableManager
                 Value<String> name = const Value.absent(),
                 Value<String?> description = const Value.absent(),
                 Value<String?> artworkPath = const Value.absent(),
+                Value<bool> isLiked = const Value.absent(),
                 Value<bool> isSmart = const Value.absent(),
                 Value<String?> smartCriteria = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
@@ -10407,6 +10472,7 @@ class $$PlaylistsTableTableManager
                 name: name,
                 description: description,
                 artworkPath: artworkPath,
+                isLiked: isLiked,
                 isSmart: isSmart,
                 smartCriteria: smartCriteria,
                 createdAt: createdAt,
@@ -10420,6 +10486,7 @@ class $$PlaylistsTableTableManager
                 required String name,
                 Value<String?> description = const Value.absent(),
                 Value<String?> artworkPath = const Value.absent(),
+                Value<bool> isLiked = const Value.absent(),
                 Value<bool> isSmart = const Value.absent(),
                 Value<String?> smartCriteria = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
@@ -10431,6 +10498,7 @@ class $$PlaylistsTableTableManager
                 name: name,
                 description: description,
                 artworkPath: artworkPath,
+                isLiked: isLiked,
                 isSmart: isSmart,
                 smartCriteria: smartCriteria,
                 createdAt: createdAt,

@@ -186,6 +186,60 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
     );
   }
 
+  Future<void> playPlaylist(
+    List<AudioItemEntity> items, {
+    int initialIndex = 0,
+    bool shuffle = false,
+  }) async {
+    if (items.isEmpty) return;
+    final playList = List<AudioItemEntity>.from(items);
+    int startIndex = initialIndex;
+
+    if (shuffle && playList.length > 1) {
+      playList.shuffle();
+      startIndex = 0;
+    }
+
+    startIndex = startIndex.clamp(0, playList.length - 1);
+    final target = playList[startIndex];
+
+    // Record play count & play history
+    await _db.incrementPlayCount(target.id);
+    try {
+      await _db.insertHistoryEntry(PlayHistoryCompanion.insert(
+        id: const Uuid().v4(),
+        userId: target.userId,
+        audioItemId: target.id,
+        playedAt: Value(DateTime.now()),
+      ));
+    } catch (_) {}
+
+    state = state.copyWith(
+      currentItem: target,
+      queue: playList,
+      queueIndex: startIndex,
+    );
+
+    await _handler.setQueue(playList, initialIndex: startIndex);
+  }
+
+  Future<void> playNextPlaylist(List<AudioItemEntity> items) async {
+    if (items.isEmpty) return;
+    final currentQueue = List<AudioItemEntity>.from(state.queue);
+    final insertIdx = (state.queueIndex + 1).clamp(0, currentQueue.length);
+    currentQueue.insertAll(insertIdx, items);
+    state = state.copyWith(queue: currentQueue);
+    await _handler.setQueue(currentQueue, initialIndex: state.queueIndex);
+  }
+
+  Future<void> addPlaylistToQueue(List<AudioItemEntity> items) async {
+    if (items.isEmpty) return;
+    final currentQueue = List<AudioItemEntity>.from(state.queue);
+    currentQueue.addAll(items);
+    state = state.copyWith(queue: currentQueue);
+    await _handler.setQueue(currentQueue, initialIndex: state.queueIndex);
+  }
+
   Future<void> playSong(AudioItemEntity item) async {
     state = state.copyWith(currentItem: item, isPlaying: false);
     await _handler.loadAndPlaySong(item);
@@ -201,6 +255,12 @@ class PlayerNotifier extends StateNotifier<PlayerState> {
       await _handler.pause();
     } else {
       await _handler.play();
+    }
+  }
+
+  Future<void> pause() async {
+    if (_handler.isPlaying) {
+      await _handler.pause();
     }
   }
 
@@ -256,3 +316,6 @@ final playerNotifierProvider =
   final db = ref.watch(appDatabaseProvider);
   return PlayerNotifier(handler, db);
 });
+
+final playerProvider = playerNotifierProvider;
+

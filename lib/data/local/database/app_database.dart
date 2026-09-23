@@ -137,6 +137,7 @@ class Playlists extends Table {
   TextColumn get name => text()();
   TextColumn get description => text().nullable()();
   TextColumn get artworkPath => text().nullable()();
+  BoolColumn get isLiked => boolean().withDefault(const Constant(false))();
   BoolColumn get isSmart => boolean().withDefault(const Constant(false))();
   TextColumn get smartCriteria => text().nullable()(); // JSON string
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
@@ -242,13 +243,15 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) => m.createAll(),
     onUpgrade: (m, from, to) async {
-      // Future migrations go here
+      if (from < 2) {
+        await m.addColumn(playlists, playlists.isLiked);
+      }
     },
   );
 

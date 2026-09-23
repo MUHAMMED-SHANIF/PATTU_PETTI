@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart';
+import 'package:uuid/uuid.dart';
 import 'app_database.dart';
 
 /// DAO for all audio item operations.
@@ -25,9 +26,14 @@ extension AudioItemsDao on AppDatabase {
 
   Future<List<AudioItem>> getAllRecordings(String userId) =>
       (select(audioItems)
-        ..where((t) => t.userId.equals(userId) & t.itemType.equals('recording') & t.isAvailable.equals(true))
+        ..where((t) =>
+            t.userId.equals(userId) &
+            (t.itemType.equals('recording') |
+                (t.itemType.equals('song') & t.genre.equals('Recording'))) &
+            t.isAvailable.equals(true))
         ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
           .get();
+
 
   Future<AudioItem?> getAudioItemById(String id) =>
       (select(audioItems)..where((t) => t.id.equals(id))).getSingleOrNull();
@@ -76,6 +82,55 @@ extension AudioItemsDao on AppDatabase {
         ..where((t) => t.userId.equals(userId) & t.isAvailable.equals(true))
         ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
         ..limit(limit))
+          .get();
+
+  Stream<List<AudioItem>> watchRecentlyPlayed(String userId, {int limit = 100}) =>
+      (select(audioItems)
+        ..where((t) => t.userId.equals(userId) & t.lastPlayedAt.isNotNull() & t.isAvailable.equals(true))
+        ..orderBy([(t) => OrderingTerm.desc(t.lastPlayedAt)])
+        ..limit(limit))
+          .watch();
+
+  Stream<List<AudioItem>> watchMostPlayed(String userId, {int limit = 100}) =>
+      (select(audioItems)
+        ..where((t) => t.userId.equals(userId) & t.playCount.isBiggerThanValue(0) & t.isAvailable.equals(true))
+        ..orderBy([(t) => OrderingTerm.desc(t.playCount)])
+        ..limit(limit))
+          .watch();
+
+  Stream<List<AudioItem>> watchRecentlyAdded(String userId, {int limit = 100}) =>
+      (select(audioItems)
+        ..where((t) => t.userId.equals(userId) & t.isAvailable.equals(true))
+        ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
+        ..limit(limit))
+          .watch();
+
+  Stream<List<AudioItem>> watchAllRecordings(String userId) =>
+      (select(audioItems)
+        ..where((t) =>
+            t.userId.equals(userId) &
+            (t.itemType.equals('recording') |
+                (t.itemType.equals('song') & t.genre.equals('Recording'))) &
+            t.isAvailable.equals(true))
+        ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
+          .watch();
+
+  Stream<List<AudioItem>> watchLongAudio(String userId, {int thresholdMs = 600000}) =>
+      (select(audioItems)
+        ..where((t) =>
+            t.userId.equals(userId) &
+            t.durationMs.isBiggerOrEqualValue(thresholdMs) &
+            t.isAvailable.equals(true))
+        ..orderBy([(t) => OrderingTerm.desc(t.durationMs)]))
+          .watch();
+
+  Future<List<AudioItem>> getLongAudio(String userId, {int thresholdMs = 600000}) =>
+      (select(audioItems)
+        ..where((t) =>
+            t.userId.equals(userId) &
+            t.durationMs.isBiggerOrEqualValue(thresholdMs) &
+            t.isAvailable.equals(true))
+        ..orderBy([(t) => OrderingTerm.desc(t.durationMs)]))
           .get();
 
   // ─── Write ──────────────────────────────────────────────
@@ -214,13 +269,66 @@ extension MergedTracksDao on AppDatabase {
       (delete(mergeItems)..where((t) => t.mergedTrackId.equals(mergedTrackId))).go();
 }
 
+/// Joined result for a playlist item containing audio item, optional file, and optional clip record.
+class PlaylistItemJoinedData {
+  final PlaylistItem item;
+  final AudioItem audio;
+  final AudioFile? file;
+  final ClipRecord? clip;
+
+  PlaylistItemJoinedData({
+    required this.item,
+    required this.audio,
+    this.file,
+    this.clip,
+  });
+}
+
+/// Aggregated stats for a playlist.
+class PlaylistWithStats {
+  final Playlist playlist;
+  final int itemCount;
+  final int totalDurationMs;
+
+  PlaylistWithStats({
+    required this.playlist,
+    required this.itemCount,
+    required this.totalDurationMs,
+  });
+}
+
 /// DAO for playlists.
 extension PlaylistsDao on AppDatabase {
   Stream<List<Playlist>> watchPlaylists(String userId) =>
       (select(playlists)
         ..where((t) => t.userId.equals(userId))
-        ..orderBy([(t) => OrderingTerm.asc(t.name)]))
+        ..orderBy([(t) => OrderingTerm.desc(t.updatedAt), (t) => OrderingTerm.asc(t.name)]))
           .watch();
+
+  Stream<List<Playlist>> watchLikedPlaylists(String userId) =>
+      (select(playlists)
+        ..where((t) => t.userId.equals(userId) & t.isLiked.equals(true))
+        ..orderBy([(t) => OrderingTerm.desc(t.updatedAt)]))
+          .watch();
+
+  Stream<List<PlaylistWithStats>> watchPlaylistsWithStats(String userId) {
+    return watchPlaylists(userId).asyncMap((list) async {
+      final result = <PlaylistWithStats>[];
+      for (final pl in list) {
+        final items = await getPlaylistItemsJoined(pl.id);
+        int totalDur = 0;
+        for (final it in items) {
+          totalDur += it.audio.durationMs ?? 0;
+        }
+        result.add(PlaylistWithStats(
+          playlist: pl,
+          itemCount: items.length,
+          totalDurationMs: totalDur,
+        ));
+      }
+      return result;
+    });
+  }
 
   Future<Playlist?> getPlaylistById(String id) =>
       (select(playlists)..where((t) => t.id.equals(id))).getSingleOrNull();
@@ -231,8 +339,10 @@ extension PlaylistsDao on AppDatabase {
   Future<void> updatePlaylist(PlaylistsCompanion playlist) =>
       (update(playlists)..where((t) => t.id.equals(playlist.id.value))).write(playlist);
 
-  Future<int> deletePlaylist(String id) =>
-      (delete(playlists)..where((t) => t.id.equals(id))).go();
+  Future<int> deletePlaylist(String id) => transaction(() async {
+    await (delete(playlistItems)..where((t) => t.playlistId.equals(id))).go();
+    return (delete(playlists)..where((t) => t.id.equals(id))).go();
+  });
 
   Future<List<PlaylistItem>> getPlaylistItems(String playlistId) =>
       (select(playlistItems)
@@ -240,13 +350,160 @@ extension PlaylistsDao on AppDatabase {
         ..orderBy([(t) => OrderingTerm.asc(t.position)]))
           .get();
 
+  Stream<List<PlaylistItemJoinedData>> watchPlaylistItemsJoined(String playlistId) {
+    final query = select(playlistItems).join([
+      innerJoin(audioItems, audioItems.id.equalsExp(playlistItems.audioItemId)),
+      leftOuterJoin(audioFiles, audioFiles.audioItemId.equalsExp(audioItems.id)),
+      leftOuterJoin(clipRecords, clipRecords.audioItemId.equalsExp(audioItems.id)),
+    ])
+      ..where(playlistItems.playlistId.equals(playlistId))
+      ..orderBy([OrderingTerm.asc(playlistItems.position)]);
+
+    return query.watch().map((rows) {
+      return rows.map((row) {
+        return PlaylistItemJoinedData(
+          item: row.readTable(playlistItems),
+          audio: row.readTable(audioItems),
+          file: row.readTableOrNull(audioFiles),
+          clip: row.readTableOrNull(clipRecords),
+        );
+      }).toList();
+    });
+  }
+
+  Future<List<PlaylistItemJoinedData>> getPlaylistItemsJoined(String playlistId) async {
+    final query = select(playlistItems).join([
+      innerJoin(audioItems, audioItems.id.equalsExp(playlistItems.audioItemId)),
+      leftOuterJoin(audioFiles, audioFiles.audioItemId.equalsExp(audioItems.id)),
+      leftOuterJoin(clipRecords, clipRecords.audioItemId.equalsExp(audioItems.id)),
+    ])
+      ..where(playlistItems.playlistId.equals(playlistId))
+      ..orderBy([OrderingTerm.asc(playlistItems.position)]);
+
+    final rows = await query.get();
+    return rows.map((row) {
+      return PlaylistItemJoinedData(
+        item: row.readTable(playlistItems),
+        audio: row.readTable(audioItems),
+        file: row.readTableOrNull(audioFiles),
+        clip: row.readTableOrNull(clipRecords),
+      );
+    }).toList();
+  }
+
   Future<void> addToPlaylist(PlaylistItemsCompanion item) =>
       into(playlistItems).insertOnConflictUpdate(item);
 
-  Future<void> removeFromPlaylist(String playlistId, String audioItemId) =>
-      (delete(playlistItems)
-        ..where((t) => t.playlistId.equals(playlistId) & t.audioItemId.equals(audioItemId)))
-          .go();
+  Future<int> addItemsToPlaylist(String playlistId, List<String> audioItemIds) async {
+    final existing = await getPlaylistItems(playlistId);
+    final existingIds = existing.map((e) => e.audioItemId).toSet();
+    int maxPos = existing.isEmpty ? 0 : existing.map((e) => e.position).fold(0, (max, p) => p > max ? p : max);
+    int addedCount = 0;
+
+    await transaction(() async {
+      for (final id in audioItemIds) {
+        if (!existingIds.contains(id)) {
+          maxPos++;
+          await into(playlistItems).insert(
+            PlaylistItemsCompanion.insert(
+              id: const Uuid().v4(),
+              playlistId: playlistId,
+              audioItemId: id,
+              position: maxPos,
+              addedAt: Value(DateTime.now()),
+            ),
+          );
+          existingIds.add(id);
+          addedCount++;
+        }
+      }
+      if (addedCount > 0) {
+        await (update(playlists)..where((t) => t.id.equals(playlistId))).write(
+          PlaylistsCompanion(updatedAt: Value(DateTime.now())),
+        );
+      }
+    });
+
+    return addedCount;
+  }
+
+  Future<void> reorderPlaylist(String playlistId, List<String> orderedAudioItemIds) async {
+    await transaction(() async {
+      for (int i = 0; i < orderedAudioItemIds.length; i++) {
+        final audioId = orderedAudioItemIds[i];
+        await (update(playlistItems)
+          ..where((t) => t.playlistId.equals(playlistId) & t.audioItemId.equals(audioId)))
+          .write(PlaylistItemsCompanion(position: Value(i)));
+      }
+      await (update(playlists)..where((t) => t.id.equals(playlistId))).write(
+        PlaylistsCompanion(updatedAt: Value(DateTime.now())),
+      );
+    });
+  }
+
+  Future<void> togglePlaylistLike(String playlistId, bool isLiked) async {
+    await (update(playlists)..where((t) => t.id.equals(playlistId))).write(
+      PlaylistsCompanion(
+        isLiked: Value(isLiked),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  Future<String?> duplicatePlaylist(String playlistId, String newName) async {
+    final source = await getPlaylistById(playlistId);
+    if (source == null) return null;
+    final newId = const Uuid().v4();
+    final items = await getPlaylistItems(playlistId);
+
+    await transaction(() async {
+      await into(playlists).insert(
+        PlaylistsCompanion.insert(
+          id: newId,
+          userId: source.userId,
+          name: newName,
+          description: Value(source.description),
+          artworkPath: Value(source.artworkPath),
+          isLiked: const Value(false),
+          isSmart: Value(source.isSmart),
+          smartCriteria: Value(source.smartCriteria),
+          createdAt: Value(DateTime.now()),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+      for (final item in items) {
+        await into(playlistItems).insert(
+          PlaylistItemsCompanion.insert(
+            id: const Uuid().v4(),
+            playlistId: newId,
+            audioItemId: item.audioItemId,
+            position: item.position,
+            addedAt: Value(DateTime.now()),
+          ),
+        );
+      }
+    });
+    return newId;
+  }
+
+  Future<void> removeFromPlaylist(String playlistId, String audioItemId) async {
+    await (delete(playlistItems)
+      ..where((t) => t.playlistId.equals(playlistId) & t.audioItemId.equals(audioItemId)))
+      .go();
+    await (update(playlists)..where((t) => t.id.equals(playlistId))).write(
+      PlaylistsCompanion(updatedAt: Value(DateTime.now())),
+    );
+  }
+
+  Future<List<Playlist>> searchPlaylists(String userId, String query) async {
+    final cleanQuery = '%${query.toLowerCase()}%';
+    return (select(playlists)
+      ..where((t) =>
+          t.userId.equals(userId) &
+          (t.name.lower().like(cleanQuery) | t.description.lower().like(cleanQuery)))
+      ..orderBy([(t) => OrderingTerm.asc(t.name)]))
+        .get();
+  }
 }
 
 /// DAO for queue and history.

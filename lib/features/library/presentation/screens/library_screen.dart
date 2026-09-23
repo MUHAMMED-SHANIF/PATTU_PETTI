@@ -15,6 +15,7 @@ import '../../../../data/local/database/app_database_dao.dart';
 import '../../../../shared/providers/global_providers.dart';
 import '../../../recording/data/recording_file_manager.dart';
 import '../../../recording/presentation/providers/recording_provider.dart';
+import '../../../playlists/presentation/widgets/add_to_playlist_modal.dart';
 
 
 /// Library screen with tab navigation: Songs, Artists, Albums, Genres,
@@ -762,217 +763,15 @@ class _SongsTabState extends ConsumerState<_SongsTab> {
   }
 
   Future<void> _showAddToPlaylistSheet(List<AudioItem> items) async {
-    final user = ref.read(authStateProvider).valueOrNull?.user;
-    if (user == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please log in to manage playlists.')),
-        );
-      }
-      return;
-    }
-    final db = ref.read(appDatabaseProvider);
-    if (!mounted) return;
-
-    await showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheetContext) {
-        return StreamBuilder<List<Playlist>>(
-          stream: db.watchPlaylists(user.id),
-          builder: (ctx, snapshot) {
-            final playlists = snapshot.data ?? [];
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Add ${items.length} song(s) to Playlist',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.textPrimary,
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.close_rounded, size: 20),
-                            onPressed: () => Navigator.of(sheetContext).pop(),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Divider(color: Colors.white12),
-                    ListTile(
-                      leading: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: AppTheme.accent.withValues(alpha: 0.15),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.add_rounded, color: AppTheme.accent),
-                      ),
-                      title: const Text('New Playlist', style: TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: const Text('Create a new playlist and add songs', style: TextStyle(fontSize: 12, color: AppTheme.textTertiary)),
-                      onTap: () async {
-                        Navigator.of(sheetContext).pop();
-                        if (mounted) {
-                          await _createNewPlaylistAndAdd(items);
-                        }
-                      },
-                    ),
-                    if (playlists.isNotEmpty) ...[
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                        child: Text(
-                          'YOUR PLAYLISTS',
-                          style: TextStyle(
-                            fontSize: 11,
-                            letterSpacing: 1,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textTertiary,
-                          ),
-                        ),
-                      ),
-                      Flexible(
-                        child: ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: playlists.length,
-                          itemBuilder: (plCtx, i) {
-                            final pl = playlists[i];
-                            return ListTile(
-                              leading: const Icon(Icons.queue_music_rounded, color: AppTheme.textSecondary),
-                              title: Text(pl.name, style: const TextStyle(color: AppTheme.textPrimary)),
-                              onTap: () async {
-                                Navigator.of(sheetContext).pop();
-                                if (mounted) {
-                                  await _addItemsToPlaylist(pl, items);
-                                }
-                              },
-                            );
-                          },
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+    if (items.isEmpty) return;
+    await AddToPlaylistModal.show(
+      context,
+      audioItemIds: items.map((e) => e.id).toList(),
+      itemTitle: items.length == 1 ? items.first.title : '${items.length} items',
     );
   }
 
-  Future<void> _createNewPlaylistAndAdd(List<AudioItem> items) async {
-    final user = ref.read(authStateProvider).valueOrNull?.user;
-    if (user == null || !mounted) return;
-    final db = ref.read(appDatabaseProvider);
-    final nameController = TextEditingController();
 
-    final playlistName = await showDialog<String>(
-      context: context,
-      builder: (dlgContext) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('New Playlist', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: TextField(
-          controller: nameController,
-          autofocus: true,
-          style: const TextStyle(color: AppTheme.textPrimary),
-          decoration: InputDecoration(
-            hintText: 'Enter playlist title',
-            hintStyle: const TextStyle(color: AppTheme.textTertiary),
-            filled: true,
-            fillColor: AppTheme.surfaceHighlight,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide.none,
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dlgContext).pop(null),
-            child: const Text('Cancel', style: TextStyle(color: AppTheme.textTertiary)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.accent,
-              foregroundColor: Colors.black,
-            ),
-            onPressed: () {
-              final text = nameController.text.trim();
-              if (text.isNotEmpty) {
-                Navigator.of(dlgContext).pop(text);
-              }
-            },
-            child: const Text('Create'),
-          ),
-        ],
-      ),
-    );
-
-    if (playlistName == null || playlistName.isEmpty) return;
-
-    final playlistId = const Uuid().v4();
-    await db.insertPlaylist(PlaylistsCompanion.insert(
-      id: playlistId,
-      userId: user.id,
-      name: playlistName,
-    ));
-
-    final created = await db.getPlaylistById(playlistId);
-    if (created != null && mounted) {
-      await _addItemsToPlaylist(created, items);
-    }
-  }
-
-  Future<void> _addItemsToPlaylist(Playlist playlist, List<AudioItem> items) async {
-    final db = ref.read(appDatabaseProvider);
-    final existingItems = await db.getPlaylistItems(playlist.id);
-    final existingAudioIds = existingItems.map((e) => e.audioItemId).toSet();
-
-    int position = existingItems.length;
-    int addedCount = 0;
-
-    for (final item in items) {
-      if (!existingAudioIds.contains(item.id)) {
-        await db.addToPlaylist(PlaylistItemsCompanion.insert(
-          id: const Uuid().v4(),
-          playlistId: playlist.id,
-          audioItemId: item.id,
-          position: position++,
-        ));
-        addedCount++;
-      }
-    }
-
-    if (mounted) {
-      _exitSelectionMode();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: AppTheme.accent,
-          content: Text(
-            addedCount > 0
-                ? 'Added $addedCount song(s) to "${playlist.name}"'
-                : 'Songs are already in "${playlist.name}"',
-            style: const TextStyle(color: Colors.black, fontWeight: FontWeight.w600),
-          ),
-        ),
-      );
-    }
-  }
 
   void _openClip(AudioItem item) {
     _exitSelectionMode();

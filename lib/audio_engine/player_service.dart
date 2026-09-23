@@ -229,6 +229,20 @@ class PattuPettiAudioHandler extends BaseAudioHandler with QueueHandler, SeekHan
     if (dur != null) {
       mediaItem.add(mItem.copyWith(duration: dur));
     }
+
+    if (item.isVirtualClip && item.clipStartMs != null) {
+      _clipStartMs = item.clipStartMs;
+      _clipEndMs = item.clipEndMs ?? (dur?.inMilliseconds ?? item.durationMs);
+      await _player.seek(Duration(milliseconds: _clipStartMs!));
+
+      _clipEndSubscription?.cancel();
+      _clipEndSubscription = _player.positionStream.listen((position) {
+        if (_clipEndMs != null && position.inMilliseconds >= _clipEndMs!) {
+          _onClipEnd();
+        }
+      });
+    }
+
     await _player.play();
   }
 

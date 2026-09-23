@@ -25,6 +25,7 @@ class RecordingRepository {
     String? description,
     String? artworkPath,
     int? durationMs,
+    String itemType = 'recording',
   }) async {
     final audioItemId = const Uuid().v4();
     final audioFileId = const Uuid().v4();
@@ -40,7 +41,7 @@ class RecordingRepository {
     final itemCompanion = AudioItemsCompanion.insert(
       id: audioItemId,
       userId: userId,
-      itemType: 'recording',
+      itemType: itemType,
       title: title.isNotEmpty ? title : 'New Recording',
       artist: Value(artist ?? 'Unknown Artist'),
       album: Value(album ?? 'Recordings'),
