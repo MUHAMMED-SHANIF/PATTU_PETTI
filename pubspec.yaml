@@ -1,0 +1,134 @@
+name: patt_petti
+description: "Pattu Petti - Local-first music player, audio manager and editor"
+# The following line prevents the package from being accidentally published to
+# pub.dev using `flutter pub publish`. This is preferred for private packages.
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+# The following defines the version and build number for your application.
+# A version number is three numbers separated by dots, like 1.2.43
+# followed by an optional build number separated by a +.
+# Both the version and the builder number may be overridden in flutter
+# build by specifying --build-name and --build-number, respectively.
+# In Android, build-name is used as versionName while build-number used as versionCode.
+# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
+# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
+# Read more about iOS versioning at
+# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
+# In Windows, build-name is used as the major, minor, and patch parts
+# of the product and file versions while build-number is used as the build suffix.
+version: 1.0.0+2008
+
+environment:
+  sdk: ">=3.12.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ─── State Management ─────────────────────────────────────
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.3.5
+
+  # ─── Navigation ───────────────────────────────────────────
+  go_router: ^14.8.1
+
+  # ─── Audio Playback ───────────────────────────────────────
+  just_audio: ^0.9.42
+  audio_service: ^0.18.16
+  audio_session: ^0.1.21
+  just_audio_background: ^0.0.1-beta.13
+
+  # ─── Audio Metadata ───────────────────────────────────────
+  audio_metadata_reader: 1.4.1
+
+  # ─── Waveform & Recording ─────────────────────────────────
+  audio_waveforms: ^1.3.0
+  record: ^5.2.0
+
+  # ─── Device Audio Scanning ────────────────────────────────
+  on_audio_query: ^2.9.0
+
+  # ─── File System ──────────────────────────────────────────
+  file_picker: ^8.1.4
+  path_provider: ^2.1.5
+  path: ^1.9.0
+
+  # ─── Permissions ──────────────────────────────────────────
+  permission_handler: ^11.3.1
+
+  # ─── Local Database (Offline-first) ───────────────────────
+  drift: ^2.23.1
+  sqlite3_flutter_libs: ^0.5.28
+  drift_flutter: ^0.2.4
+
+  # ─── Supabase ─────────────────────────────────────────────
+  supabase_flutter: ^2.7.0
+
+  # ─── Secure Storage ───────────────────────────────────────
+  flutter_secure_storage: ^9.2.2
+
+  # ─── Connectivity ─────────────────────────────────────────
+  connectivity_plus: ^6.1.1
+
+  # ─── Image / Artwork ──────────────────────────────────────
+  image_picker: ^1.1.2
+  cached_network_image: ^3.4.1
+  flutter_cache_manager: ^3.4.1
+
+  # ─── FFmpeg (Physical clip/merge rendering) ───────────────
+  ffmpeg_kit_flutter_new: ^4.6.2
+
+  # ─── Search ───────────────────────────────────────────────
+  fuzzy: ^0.5.1+1
+
+  # ─── Shared Preferences ───────────────────────────────────
+  shared_preferences: ^2.3.3
+
+  # ─── UI / Design ──────────────────────────────────────────
+  google_fonts: ^6.2.1
+  flutter_svg: ^2.0.17
+  lottie: ^3.1.3
+
+  # ─── Utilities ────────────────────────────────────────────
+  uuid: ^4.5.1
+  intl: ^0.19.0
+  collection: ^1.19.1
+  crypto: ^3.0.5
+  equatable: ^2.0.7
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+  rxdart: ^0.28.0
+  share_plus: ^12.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^5.0.0
+
+  # ─── Code Generation ──────────────────────────────────────
+  build_runner: ^2.4.14
+  riverpod_generator: ^2.4.3
+  drift_dev: ^2.23.1
+  freezed: ^2.5.8
+  json_serializable: ^6.9.4
+
+  # ─── Testing ──────────────────────────────────────────────
+  mocktail: ^1.0.4
+  integration_test:
+    sdk: flutter
+
+
+
+dependency_overrides:
+  record_platform_interface: 1.2.0
+
+# The following section is specific to Flutter packages.
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/icons/
+    - assets/animations/
+
